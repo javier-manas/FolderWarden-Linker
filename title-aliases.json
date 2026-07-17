@@ -1,10 +1,28 @@
-﻿{
-    "canonical":  "Re Zero kara Hajimeru Isekai Seikatsu",
-    "aliases":  [
-                    "Re Zero kara Hajimeru Isekai Seikatsu",
-                    "ReZero Starting Life in Another World",
-                    "ReZERO Starting Life in Another World",
-                    "ReZERO -Starting Life in Another World-",
-                    "Re Zero Starting Life in Another World"
-                ]
-}
+﻿[
+  {
+    "canonical": "Re Zero kara Hajimeru Isekai Seikatsu",
+    "aliases": [
+      "Re Zero kara Hajimeru Isekai Seikatsu",
+      "ReZero Starting Life in Another World",
+      "ReZERO Starting Life in Another World",
+      "ReZERO -Starting Life in Another World-",
+      "Re Zero Starting Life in Another World"
+    ]
+  },
+  {
+    "canonical": "Nippon Sangoku",
+    "aliases": [
+      "Nippon Sangoku",
+      "NIPPON SANGOKU The Three Nations of the Crimson Sun",
+      "Nippon Sangoku The Three Nations of the Crimson Sun"
+    ]
+  },
+  {
+    "canonical": "Mushoku Tensei S3",
+    "aliases": [
+      "Mushoku Tensei S3",
+      "Mushoku Tensei III"
+    ]
+  }
+
+]
