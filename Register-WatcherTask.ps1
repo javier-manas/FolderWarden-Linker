@@ -68,3 +68,52 @@ Write-Host "Se ejecutará automáticamente en el próximo inicio de sesión, sin
 Write-Host ""
 Write-Host "Para iniciarla ahora mismo sin reiniciar sesión, ejecuta:" -ForegroundColor Yellow
 Write-Host "    Start-ScheduledTask -TaskName '$TaskName'"
+
+# ============================================================
+# ======  TAREA 2: reinicio semanal automático  ==============
+# ============================================================
+# Objetivo: recargar title-aliases.json sin que tengas que parar/arrancar el script a mano
+# cada vez que añades una nueva equivalencia de título.
+# Es una tarea aparte, muy corta (para, espera 5s, arranca) y también oculta.
+
+$EnableWeeklyRestart = $true          # Pon en $false si no quieres este reinicio automático
+$RestartDayOfWeek    = "Sunday"       # Día de la semana para el reinicio
+$RestartTime         = "04:00"        # Hora (poco uso previsible), formato 24h "HH:mm"
+$RestartTaskName     = "WatchFolderToShortcuts-WeeklyRestart"
+
+if ($EnableWeeklyRestart) {
+
+    # Pequeño script que para y vuelve a arrancar la tarea principal
+    $RestartScriptPath = Join-Path $PSScriptRoot "Restart-WatcherTask.ps1"
+    $restartScriptContent = @"
+# Generado automáticamente por Register-WatcherTask.ps1. Para y reinicia la tarea principal
+# para que recargue title-aliases.json (y cualquier otro cambio de configuración).
+Stop-ScheduledTask -TaskName "$TaskName" -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 5
+Start-ScheduledTask -TaskName "$TaskName"
+"@
+    Set-Content -LiteralPath $RestartScriptPath -Value $restartScriptContent -Encoding UTF8
+
+    # Lanzador oculto para este script de reinicio (mismo motivo que Launch-Hidden.vbs)
+    $RestartVbsPath = Join-Path $PSScriptRoot "Restart-Hidden.vbs"
+    $restartVbsContent = @"
+Set objShell = CreateObject("WScript.Shell")
+objShell.Run "$pwshExe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""$RestartScriptPath""", 0, True
+"@
+    # Nota: el último parámetro es True (esperar a que termine) para que la tarea programada
+    # no se marque como "finalizada" antes de que el reinicio se haya completado de verdad.
+    Set-Content -LiteralPath $RestartVbsPath -Value $restartVbsContent -Encoding ASCII
+
+    $restartAction  = New-ScheduledTaskAction -Execute $wscriptExe -Argument "`"$RestartVbsPath`""
+    $restartTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $RestartDayOfWeek -At $RestartTime
+    $restartSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+
+    Register-ScheduledTask -TaskName $RestartTaskName -Action $restartAction -Trigger $restartTrigger `
+        -Settings $restartSettings -Principal $principal `
+        -Description "Reinicia semanalmente $TaskName para recargar title-aliases.json" `
+        -Force | Out-Null
+
+    Write-Host ""
+    Write-Host "Reinicio automático semanal configurado: cada $RestartDayOfWeek a las $RestartTime." -ForegroundColor Green
+    Write-Host "Para desactivarlo: Unregister-ScheduledTask -TaskName '$RestartTaskName' -Confirm:`$false" -ForegroundColor Yellow
+}

@@ -33,6 +33,13 @@ iniciar sesión) — no hay que ejecutarlo a mano.
 | `Register-WatcherTask.ps1` | Solo se ejecuta una vez, para crear la tarea programada. |
 | `title-aliases.json` | Aquí se enseñan equivalencias de título que el script no puede deducir solo (ver abajo). |
 | `_watcher.log` (dentro de la carpeta B) | Registro de actividad: qué se creó, qué se ignoró, avisos de posibles duplicados. |
+| `Launch-Hidden.vbs` / `Restart-Hidden.vbs` | Lanzadores ocultos generados automáticamente. No los toques a mano. |
+
+## Reinicio automático semanal
+Cada domingo a las 04:00, una segunda tarea programada
+(`WatchFolderToShortcuts-WeeklyRestart`) para y vuelve a arrancar el
+watcher solo, para que recargue `title-aliases.json` sin que tengas que
+hacerlo tú. Para desactivarlo: `Unregister-ScheduledTask -TaskName "WatchFolderToShortcuts-WeeklyRestart" -Confirm:$false`
 
 ## Mantenimiento: dos series que deberían ser una carpeta
 

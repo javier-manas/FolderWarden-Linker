@@ -1,2 +1,2 @@
 Set objShell = CreateObject("WScript.Shell")
-objShell.Run "C:\windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""D:\xxxxx\FolderWarden\Watch-FolderToShortcuts.ps1""", 0, False
+objShell.Run "C:\windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""D:\VSworkplace\FolderWarden\Watch-FolderToShortcuts.ps1""", 0, False

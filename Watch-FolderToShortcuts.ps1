@@ -43,10 +43,10 @@
 # ============================================================
 
 # Carpeta de origen a monitorizar (incluye subcarpetas)
-$FolderA = "xxx"
+$FolderA = "F:\torrents\1_recien_descargados"
 
 # Carpeta donde se crearán los accesos directos
-$FolderB = "xxx"
+$FolderB = "D:\2 cosas\Series & Films"
 
 # Archivo de log (se crea automáticamente su carpeta si no existe)
 $LogFile = Join-Path $FolderB "_watcher.log"
@@ -152,8 +152,14 @@ function Wait-ForFileReady {
             return $false
         }
         try {
-            # Intenta abrir el archivo en modo exclusivo; si lo consigue, no está bloqueado
-            $stream = [System.IO.File]::Open($Path, 'Open', 'Read', 'None')
+            # Se pide acceso de LECTURA compartida (no exclusiva). Esto es suficiente para
+            # detectar un archivo genuinamente a medio descargar (la mayoría de clientes de
+            # descarga sí bloquean en modo exclusivo mientras escriben), pero evita falsos
+            # positivos con clientes de torrents que mantienen el archivo abierto de forma
+            # indefinida mientras siembran (seeding) ya al 100% completado. Pedir
+            # FileShare.None (exclusividad total) chocaría con ESE acceso de lectura del
+            # cliente de torrents para siempre, no solo mientras se descarga.
+            $stream = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
             $stream.Close()
             $stream.Dispose()
             return $true
@@ -166,13 +172,29 @@ function Wait-ForFileReady {
     return $false
 }
 
+# ---------- Convierte un numeral romano (II a X) a su número de temporada equivalente ----------
+function Convert-RomanToSeasonNumber {
+    param([string]$Roman)
+    $map = @{ 'II'=2; 'III'=3; 'IV'=4; 'V'=5; 'VI'=6; 'VII'=7; 'VIII'=8; 'IX'=9; 'X'=10 }
+    $key = $Roman.ToUpperInvariant()
+    if ($map.ContainsKey($key)) { return $map[$key] }
+    return $null
+}
+
 # ---------- Limpia un nombre de archivo/carpeta de "scene release" para deducir el título de la obra ----------
 # Heurística basada en expresiones regulares (sin consultas externas). No es infalible: nombres muy
 # atípicos pueden no limpiarse del todo, en cuyo caso se devuelve el nombre original.
+#
+# IMPORTANTE: el número de TEMPORADA se PRESERVA en el resultado (normalizado como " S<N>"), no se
+# descarta. Solo se normaliza la NOTACIÓN (S3 = III = "3rd Season") para que la misma temporada no
+# genere carpetas distintas por venir escrita de forma diferente entre grupos de release. Si quieres
+# que varias temporadas de una obra compartan la MISMA carpeta (como con Re:Zero), usa una entrada en
+# title-aliases.json — eso tiene prioridad sobre esta normalización.
 function Get-CleanTitle {
     param([string]$RawName)
 
     $name = $RawName
+    $seasonNumber = $null   # se rellena si se detecta un número de temporada en cualquiera de los patrones
 
     # Normaliza separadores típicos de "scene naming" (puntos, guiones bajos) a espacios
     $name = $name -replace '[\._]', ' '
@@ -183,17 +205,13 @@ function Get-CleanTitle {
     $name = $name -replace '\([^\)]*\)', ' '   # paréntesis: suelen contener año/tags, no forman parte del título
 
     # ---- CORTE PRINCIPAL: se busca el primer marcador de episodio (S04E09, 1x01, Episodio 12...) ----
-    # y se descarta TODO lo que hay desde ahí en adelante (número/título de episodio + tags técnicos).
-    # Esto es muchísimo más fiable que cortar por un guion, porque en el naming tipo scene-release
-    # (con puntos como separador: "Serie.S03E06.Titulo.Episodio.1080p...") no hay ningún " - ".
-    # Ejemplos reales:
-    #   "Jujutsu Kaisen S03E06 Cog 1080p NF WEB-DL..."      -> corta en "S03E06" -> "Jujutsu Kaisen"
-    #   "Jujutsu Kaisen S03E01 Execution 1080p NF WEB-DL..." -> corta en "S03E01" -> "Jujutsu Kaisen"
-    # Ambos dan el MISMO título, así que acaban en la misma carpeta de obra.
-    $episodeMarkerPattern = '(?i)\bS\d{1,2}\s*E\d{1,3}\b|\b\d{1,2}x\d{2,3}\b|\b(Episodio|Episode|Ep\.?|Cap[ií]tulo|Cap\.?)\s*\d{1,4}\b'
+    # y se descarta lo que hay desde ahí en adelante EXCEPTO el número de temporada, que se guarda.
+    $episodeMarkerPattern = '(?i)\bS(\d{1,2})\s*E\d{1,3}\b|\b(\d{1,2})x\d{2,3}\b|\b(Episodio|Episode|Ep\.?|Cap[ií]tulo|Cap\.?)\s*\d{1,4}\b'
     $marker = [regex]::Match($name, $episodeMarkerPattern)
 
     if ($marker.Success -and $marker.Index -gt 0) {
+        if ($marker.Groups[1].Success) { $seasonNumber = [int]$marker.Groups[1].Value }       # SxxEyy
+        elseif ($marker.Groups[2].Success) { $seasonNumber = [int]$marker.Groups[2].Value }    # NxNN
         $name = $name.Substring(0, $marker.Index)
     }
     elseif ($SplitTitleAtFirstDash -and $name -match '^(.+?)\s-\s.+$') {
@@ -203,23 +221,47 @@ function Get-CleanTitle {
     }
 
     # A partir de aquí, limpieza adicional como red de seguridad para nombres SIN marcador de episodio
-    # NI guion (ej. películas sueltas: "The.Matrix.1999.1080p.BluRay.x264-GROUP.mkv").
-
-    # Por si ha quedado algún marcador de temporada/episodio suelto (nombres atípicos, o carpetas ya limpias)
+    # NI guion (ej. películas sueltas, o carpetas ya limpias con la temporada suelta al final).
     $name = $name -replace '(?i)\bS\d{1,2}\s*E\d{1,3}\b', ' '
     $name = $name -replace '(?i)\b\d{1,2}x\d{1,3}\b', ' '
-    $name = $name -replace '(?i)\bSeason\s*\d{1,2}\b', ' '
-    $name = $name -replace '(?i)\bTemporada\s*\d{1,2}\b', ' '
     $name = $name -replace '(?i)\b(Episodio|Episode|Ep\.?|Cap[ií]tulo|Cap\.?)\s*\d{1,4}\b', ' '
     $name = $name -replace '(?i)\bE\d{2,4}\b', ' '
 
-    # Elimina sufijos de "entrega" de una misma obra (habituales en anime: distintas temporadas
-    # anunciadas con texto en vez de con SxxEyy). Esto es lo que fusiona, por ejemplo,
-    # "Re Zero kara Hajimeru Isekai Seikatsu" y "Re Zero kara Hajimeru Isekai Seikatsu 4th Season"
-    # en la MISMA carpeta de obra.
-    $name = $name -replace '(?i)\b(\d+(st|nd|rd|th)|final|first|second|third|last|new)\s+season\b', ' '
-    $name = $name -replace '(?i)\bpart\s*\d{1,2}\b', ' '
-    $name = $name -replace '(?i)\bcour\s*\d{1,2}\b', ' '
+    # Formas alternativas de indicar temporada (SOLO si aún no se detectó ninguna arriba).
+    # Se detecta el número y se elimina el texto original; el número se añade al final más abajo.
+    if (-not $seasonNumber) {
+        $m = [regex]::Match($name, '(?i)\b(\d{1,2})\s*(st|nd|rd|th)?\s+season\b')
+        if (-not $m.Success) { $m = [regex]::Match($name, '(?i)\bseason\s*(\d{1,2})\b') }
+        if (-not $m.Success) { $m = [regex]::Match($name, '(?i)\btemporada\s*(\d{1,2})\b') }
+        if ($m.Success) {
+            $seasonNumber = [int]$m.Groups[1].Value
+            $name = $name.Remove($m.Index, $m.Length)
+        }
+    }
+    if (-not $seasonNumber -and $name -match '(?i)\bfinal\s+season\b') {
+        # "Final Season" no tiene número explícito; se deja tal cual (no se puede normalizar sin
+        # saber cuántas temporadas tiene la obra), solo se limpia el espaciado.
+        $name = $name -replace '(?i)\bfinal\s+season\b', ' Final Season '
+    }
+
+    # Temporada abreviada SUELTA al final: "Serie S3" -> guarda 3, quita "S3"
+    if (-not $seasonNumber) {
+        $m = [regex]::Match($name, '(?i)\bS(\d{1,2})\s*$')
+        if ($m.Success) {
+            $seasonNumber = [int]$m.Groups[1].Value
+            $name = $name.Remove($m.Index, $m.Length)
+        }
+    }
+
+    # Numeral romano SUELTO al final: "Serie III" -> guarda 3, quita "III". Se excluye "I" solo,
+    # porque es demasiado ambiguo (podría ser una palabra/letra real del título).
+    if (-not $seasonNumber) {
+        $m = [regex]::Match($name, '(?i)\b(II|III|IV|VI{0,3}|IX|X)\s*$')
+        if ($m.Success) {
+            $seasonNumber = Convert-RomanToSeasonNumber -Roman $m.Groups[1].Value
+            $name = $name.Remove($m.Index, $m.Length)
+        }
+    }
 
     # Elimina un número "suelto" al final (típico marcador de episodio: "Naruto 001")
     $name = $name -replace '(?:^|\s|-)\d{1,4}\s*$', ' '
@@ -250,8 +292,16 @@ function Get-CleanTitle {
     $name = $name.Trim(' ', '-', '_', '.')
 
     if ([string]::IsNullOrWhiteSpace($name)) {
-        return $RawName.Trim()
+        $name = $RawName.Trim()
     }
+
+    # Reintegra el número de temporada normalizado (si se detectó alguno). Esto es lo que hace
+    # que "Youjo Senki S2" y "Youjo Senki II" den EXACTAMENTE el mismo resultado: "Youjo Senki S2".
+    if ($seasonNumber) {
+        $name = "$name S$seasonNumber"
+    }
+
+    return $name
     return $name
 }
 
@@ -458,7 +508,15 @@ function New-ShortcutForFile {
         $shortcut = $shell.CreateShortcut($lnkPath)
         $shortcut.TargetPath = $SourcePath
         $shortcut.WorkingDirectory = [System.IO.Path]::GetDirectoryName($SourcePath)
-        $shortcut.Description = "Acceso directo generado automáticamente a $SourcePath"
+        try {
+            # La propiedad Description de WshShortcut tiene un límite interno de longitud/codificación
+            # poco documentado que puede lanzar "El valor no está dentro del intervalo esperado" con
+            # rutas muy largas o con ciertos caracteres (p. ej. corchetes japoneses 『』). No es un dato
+            # esencial del acceso directo, así que si falla, se omite en vez de abortar la creación entera.
+            $shortcut.Description = "Acceso directo generado automáticamente a $SourcePath"
+        } catch {
+            Write-Log "AVISO: no se pudo asignar la descripción del acceso directo para '$SourcePath' (se crea igualmente sin descripción): $($_.Exception.Message)" 'WARN'
+        }
         $shortcut.Save()
         [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut)
         [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
