@@ -39,6 +39,37 @@
 #>
 
 # ============================================================
+# =====  OCULTAR VENTANA (best-effort) + REGISTRO DE PID  =====
+# ============================================================
+# Intento de auto-ocultación de la ventana de consola (funciona en hosts de consola clásicos,
+# pero Windows Terminal ignora este handle porque renderiza su propia ventana aparte — por eso
+# la tarea programada lanza este script a través de un lanzador .vbs que SÍ oculta la ventana
+# de verdad en cualquier caso; ver Register-WatcherTask.ps1). Se deja aquí como intento adicional
+# inofensivo por si en el futuro no se usa el lanzador .vbs.
+try {
+    Add-Type -Name Window -Namespace Console -MemberDefinition '
+        [DllImport("Kernel32.dll")]
+        public static extern IntPtr GetConsoleWindow();
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    ' -ErrorAction Stop
+    $consoleHandle = [Console.Window]::GetConsoleWindow()
+    if ($consoleHandle -ne [IntPtr]::Zero) {
+        [Console.Window]::ShowWindow($consoleHandle, 0) | Out-Null   # 0 = SW_HIDE
+    }
+} catch {
+    # No crítico si falla.
+}
+
+# Como el lanzador .vbs hace que este proceso "se escape" del control de Task Scheduler
+# (Stop-ScheduledTask ya no puede pararlo por sí solo), este script escribe su propio PID en un
+# archivo. El script de ayuda "Stop-Watcher.ps1" (en la misma carpeta) lee este archivo y mata el
+# proceso real directamente, así que parar el watcher siempre es fiable, sin dejar zombis.
+$script:PidFilePath = Join-Path $PSScriptRoot "watcher.pid"
+try { Set-Content -LiteralPath $script:PidFilePath -Value $PID -Encoding ASCII -Force } catch {}
+
+
+# ============================================================
 # ============  CONFIGURACIÓN (edítalo a tu gusto) ===========
 # ============================================================
 
@@ -295,11 +326,11 @@ function Get-CleanTitle {
         $name = $RawName.Trim()
     }
 
-    # Reintegra el número de temporada normalizado (si se detectó alguno). Esto es lo que hace
-    # que "Youjo Senki S2" y "Youjo Senki II" den EXACTAMENTE el mismo resultado: "Youjo Senki S2".
-    if ($seasonNumber) {
-        $name = "$name S$seasonNumber"
-    }
+    # NOTA: el número de temporada detectado ($seasonNumber) se usa solo INTERNAMENTE, durante la
+    # limpieza, para reconocer que "S3" y "III" son la MISMA temporada y así evitar duplicados de
+    # notación — pero no se añade al resultado final. Todas las temporadas de una obra comparten
+    # la misma carpeta (tal y como se pidió desde el principio: una carpeta por obra, no por
+    # temporada). Si alguna vez quieres una carpeta por temporada, dilo y lo hacemos configurable.
 
     return $name
     return $name
@@ -677,5 +708,8 @@ finally {
     Unregister-Event -SourceIdentifier $onError.Name -ErrorAction SilentlyContinue
     $watcher.EnableRaisingEvents = $false
     $watcher.Dispose()
+    if ($script:PidFilePath -and (Test-Path -LiteralPath $script:PidFilePath)) {
+        Remove-Item -LiteralPath $script:PidFilePath -Force -ErrorAction SilentlyContinue
+    }
     Write-Log "==== Watch-FolderToShortcuts detenido ===="
 }
