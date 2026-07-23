@@ -1,4 +1,4 @@
-# FolderWarden — Chuletario rápido
+# FolderWarden
 
 > Reemplaza `<RUTA_SCRIPT>` por la carpeta donde tengas los archivos
 > (ej. `D:\VSworkplace\FolderWarden`) y `<RUTA_LOG>` por tu carpeta B.
